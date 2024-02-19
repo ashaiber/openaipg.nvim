@@ -2,13 +2,7 @@ local yaml = require"openaipg.yaml"
 
 local Api = {}
 
-local function callOpenAI(promptText, model)
-    local apiKey = os.getenv("OPENAI_API_KEY") -- Make sure the API key is set in your environment variables
-    if not apiKey then
-        vim.api.nvim_err_writeln("OPENAI_API_KEY environment variable not set")
-        return
-    end
-
+local function callOpenAI(promptText, model, azure_endpoint)
     -- Prepare the JSON payload using Neovim's built-in JSON support
     local data = vim.json.encode({
         model = model,
@@ -18,11 +12,33 @@ local function callOpenAI(promptText, model)
         }
     })
 
-    -- Prepare the curl command
-    local curlCmd = string.format([[curl -s -X POST https://api.openai.com/v1/chat/completions \
-        -H "Content-Type: application/json" \
-        -H "Authorization: Bearer %s" \
-        -d '%s']], apiKey, data:gsub("'", "'\\''")) -- Handle single quotes in JSON
+    local apiKey = nil
+    local curlCmd = nil
+    -- Check if using Azure or OpenAI
+    if azure_endpoint then
+        apiKey = os.getenv("AZURE_OPENAI_API_KEY")
+        if not apiKey then
+            vim.api.nvim_err_writeln("AZURE_OPENAI_API_KEY environment variable not set")
+            return
+        end
+        -- Prepare the curl command
+        curlCmd = string.format([[curl -s -X POST %s/v1/chat/completions \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer %s" \
+            -d '%s']], azure_endpoint, apiKey, data:gsub("'", "'\\''")) -- Handle single quotes in JSON
+        print("Azure endpoint: " .. azure_endpoint)
+    else
+        apiKey = os.getenv("OPENAI_API_KEY") -- Make sure the API key is set in your environment variables
+        if not apiKey then
+            vim.api.nvim_err_writeln("OPENAI_API_KEY environment variable not set")
+            return
+        end
+        curlCmd = string.format([[curl -s -X POST https://api.openai.com/v1/chat/completions \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer %s" \
+            -d '%s']], apiKey, data:gsub("'", "'\\''")) -- Handle single quotes in JSON
+    end
+
 
     -- Execute the curl command
     local result = vim.fn.system(curlCmd)
@@ -71,6 +87,11 @@ local function findAndProcessPrompt()
         print("Model not specified in YAML. Using default model: gpt-3.5-turbo")
     end
 
+    local azure_endpoint = nil
+    if config["azure_endpoint"] then
+        azure_endpoint = config["azure_endpoint"]
+    end
+
 
     local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
     local startLine, endLine = nil, nil
@@ -93,7 +114,7 @@ local function findAndProcessPrompt()
 
     -- Proceed with extracting the text and making the API call
     local promptText = table.concat(lines, "\n", startLine, endLine)
-    local responseContent = callOpenAI(promptText, model) -- Assuming callOpenAI is implemented as discussed earlier
+    local responseContent = callOpenAI(promptText, model, azure_endpoint) -- Assuming callOpenAI is implemented as discussed earlier
 
     if responseContent then
         -- Insert the API response into the buffer after "% End of Prompt" line
